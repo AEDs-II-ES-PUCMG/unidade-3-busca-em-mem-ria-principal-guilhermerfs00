@@ -1,4 +1,6 @@
 import java.nio.charset.Charset;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.NoSuchElementException;
 import java.util.Random;
 import java.util.Scanner;
@@ -79,7 +81,11 @@ public class App {
         System.out.println("3 - Pedidos de um produto, em arquivo");
         System.out.println("0 - Sair");
         System.out.print("Digite sua opção: ");
-        return Integer.parseInt(teclado.nextLine());
+        try {
+            return Integer.parseInt(teclado.nextLine());
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     /**
@@ -120,7 +126,8 @@ public class App {
         } catch (IOException excecaoArquivo) {
             produtosCadastrados = null;
         } finally {
-            arquivo.close();
+            if (arquivo != null)
+                arquivo.close();
         }
 
         return produtosCadastrados;
@@ -134,7 +141,11 @@ public class App {
     static Produto localizarProdutoID() {
         cabecalho();
         System.out.println("LOCALIZANDO POR ID");
-        int ID = lerOpcao("Digite o ID para busca", Integer.class);
+        Integer ID = lerOpcao("Digite o ID para busca", Integer.class);
+        if (ID == null) {
+            System.out.println("ID inválido!");
+            return null;
+        }
         Produto localizado = localizarProduto(produtosPorId, ID);
         mostrarProduto(localizado);
         return localizado;
@@ -142,7 +153,12 @@ public class App {
 
     static <K> Produto localizarProduto(ABB<K, Produto> produtosCadastrados, K chave) {
         cabecalho();
-        Produto localizado = produtosCadastrados.pesquisar(chave);
+        Produto localizado = null;
+        try {
+            localizado = produtosCadastrados.pesquisar(chave);
+        } catch (NoSuchElementException e) {
+            localizado = null;
+        }
         System.out.println("Tempo: " + produtosCadastrados.getTempo());
         System.out.println("Comparações: " + produtosCadastrados.getComparacoes());
         pausa();
@@ -170,9 +186,13 @@ public class App {
             quantProdutos = sorteio.nextInt(8) + 1;
             for (int j = 0; j < quantProdutos; j++) {
                 int id = sorteio.nextInt(7750) + 10_000;
-                Produto prod = produtosPorId.pesquisar(id);
-                ped.incluirProduto(prod);
-                inserirNaTabela(prod, ped);
+                try {
+                    Produto prod = produtosPorId.pesquisar(id);
+                    ped.incluirProduto(prod);
+                    inserirNaTabela(prod, ped);
+                } catch (NoSuchElementException e) {
+                    // ignora IDs não encontrados
+                }
             }
             pedidos.inserir(ped);
         }
@@ -180,7 +200,23 @@ public class App {
     }
 
     private static void inserirNaTabela(Produto produto, Pedido pedido) {
-        // TODO
+        if (produto == null || pedido == null)
+            return;
+
+        Lista<Pedido> pedidosDoProduto;
+
+        try {
+            pedidosDoProduto = pedidosPorProduto.pesquisar(produto);
+        } catch (NoSuchElementException e) {
+            pedidosDoProduto = new Lista<>();
+            pedidosPorProduto.inserir(produto, pedidosDoProduto);
+        }
+
+        try {
+            pedidosDoProduto.pesquisar(pedido);
+        } catch (NoSuchElementException e) {
+            pedidosDoProduto.inserir(pedido);
+        }
     }
 
     private static void recortarArvore(ABB<String, Produto> arvore) {
@@ -194,16 +230,37 @@ public class App {
         System.out.println(arvore.recortar(descIni, descFim));
     }
 
-    static void pedidosDoProduto(){
+    static void pedidosDoProduto() {
         Produto produto = localizarProdutoID();
-        String nomeArquivo = "RelatorioProduto"+produto.hashCode()+".txt";    
-        try (FileWriter arquivoRelatorio = new FileWriter(nomeArquivo)){
+        if (produto == null) {
+            System.out.println("Produto não encontrado.");
+            return;
+        }
+
+        String nomeArquivo = "RelatorioProduto" + produto.hashCode() + ".txt";
+        try (FileWriter arquivoRelatorio = new FileWriter(nomeArquivo)) {
             Lista<Pedido> listaProd = pedidosPorProduto.pesquisar(produto);
-            arquivoRelatorio.append(listaProd+"\n");
-            arquivoRelatorio.close();
-            System.out.println("Dados salvos em "+nomeArquivo);
+
+            arquivoRelatorio.append("RELATÓRIO DE PEDIDOS POR PRODUTO\n");
+            arquivoRelatorio.append("Gerado em: ")
+                    .append(LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss")))
+                    .append("\n\n");
+            arquivoRelatorio.append("Produto:\n");
+            arquivoRelatorio.append(produto.toString()).append("\n\n");
+            arquivoRelatorio.append("Total de pedidos com este produto: ").append(String.valueOf(listaProd.tamanho()))
+                    .append("\n\n");
+
+            for (int i = 0; i < listaProd.tamanho(); i++) {
+                Pedido pedido = listaProd.elementoNaPosicao(i);
+                arquivoRelatorio.append("Pedido ").append(String.valueOf(i + 1)).append(": ")
+                        .append(pedido.resumo()).append("\n");
+            }
+
+            System.out.println("Dados salvos em " + nomeArquivo);
+        } catch (NoSuchElementException e) {
+            System.out.println("Não há pedidos registrados para este produto.");
         } catch (IOException e) {
-            System.out.println("Problemas para criar o arquivo "+nomeArquivo+". Tente novamente");
+            System.out.println("Problemas para criar o arquivo " + nomeArquivo + ". Tente novamente");
         }
     }
 
@@ -211,6 +268,11 @@ public class App {
         teclado = new Scanner(System.in, Charset.forName("UTF-8"));
         nomeArquivoDados = "produtos.txt";
         produtosPorId = lerProdutos(nomeArquivoDados, Produto::hashCode);
+        if (produtosPorId == null) {
+            System.out.println("Falha ao carregar dados do arquivo " + nomeArquivoDados + ".");
+            teclado.close();
+            return;
+        }
         produtosPorNome = new AVL<>(produtosPorId, prod -> prod.descricao, String::compareTo);
         pedidosPorProduto = new TabelaHash<>((int) (quantosProdutos * 1.25));
         gerarPedidos(25000);
@@ -223,6 +285,9 @@ public class App {
                 case 1 -> localizarProdutoID();
                 case 2 -> recortarArvore(produtosPorNome);
                 case 3 -> pedidosDoProduto();
+                case 0 -> {
+                }
+                default -> System.out.println("Opção inválida!");
             }
             pausa();
         } while (opcao != 0);
