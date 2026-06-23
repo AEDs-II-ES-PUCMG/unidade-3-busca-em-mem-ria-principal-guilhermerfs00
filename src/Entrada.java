@@ -43,6 +43,6 @@ public class Entrada<K, V> {
 	
 	@Override
 	public String toString() {
-		return (this.chave + " -- " + this.valor);
+		return (this.chave + "-->" + this.valor);
 	}
 }
